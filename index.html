@@ -101,21 +101,21 @@
     <div id="modal-container"></div>
 
     <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-    import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-    import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 
     // ====================================================
-    // GLOBAL APP STATE & FIREBASE
+    // SUPABASE CONFIGURATION
+    // ====================================================
+    const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+    const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+    // ====================================================
+    // GLOBAL APP STATE & SUPABASE
     // ====================================================
     let currentActiveView = 'init';
     let isFirstLoad = true;
-    let isFirebaseEnabled = false;
-    let db, auth, profilesCollectionRef;
-
-    const appId = typeof __app_id !== 'undefined' ? __app_id : 'emergency-id-default';
-    const firebaseConfigStr = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
-    const customToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+    let isSupabaseEnabled = false;
+    let supabase = null;
 
     // ====================================================
     // SAFE STORAGE (Local configs)
@@ -174,17 +174,25 @@
             if (!keepId || !profile.id) {
                 profile.id = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
             }
-            profile.createdAt = new Date().toISOString();
             if (!profile.status) profile.status = 'active';
-            if (!profile.plan) profile.plan = 'premium'; // Default to premium if not specified
+            if (!profile.plan) profile.plan = 'premium';
 
             // Optimistic update
             this.profiles.push(profile);
             this.activeProfileIndex = this.profiles.length - 1;
 
-            if (isFirebaseEnabled) {
-                try { await setDoc(doc(profilesCollectionRef, profile.id), profile); } 
-                catch(e) { console.error("Error guardando en la nube:", e); }
+            if (isSupabaseEnabled) {
+                try {
+                    const { error } = await supabase.from('profiles').upsert({
+                        id: profile.id,
+                        name: profile.name,
+                        status: profile.status,
+                        type: profile.type,
+                        plan: profile.plan,
+                        created_at: new Date().toISOString()
+                    });
+                    if (error) console.error("Error guardando en Supabase:", error);
+                } catch(e) { console.error("Error guardando en la nube:", e); }
             } else {
                 this.saveLocalData();
             }
@@ -207,9 +215,31 @@
                 const updatedProfile = { ...this.profiles[index], ...data, updatedAt: new Date().toISOString() };
                 this.profiles[index] = updatedProfile;
 
-                if (isFirebaseEnabled) {
-                    try { await setDoc(doc(profilesCollectionRef, updatedProfile.id), updatedProfile, { merge: true }); }
-                    catch(e) { console.error("Error actualizando en la nube:", e); }
+                if (isSupabaseEnabled) {
+                    try {
+                        const updateData = {
+                            name: updatedProfile.name,
+                            status: updatedProfile.status,
+                            type: updatedProfile.type,
+                            plan: updatedProfile.plan,
+                            photo: updatedProfile.photo || null,
+                            phone: updatedProfile.phone || null,
+                            emergency_contact: updatedProfile.emergencyContact || null,
+                            emergency_phone: updatedProfile.emergencyPhone || null,
+                            medical_notes: updatedProfile.medicalNotes || null,
+                            allergies: updatedProfile.allergies || null,
+                            blood_type: updatedProfile.bloodType || null,
+                            address: updatedProfile.address || null,
+                            owner_name: updatedProfile.ownerName || null,
+                            breed: updatedProfile.breed || null,
+                            color: updatedProfile.color || null,
+                            weight: updatedProfile.weight || null,
+                            birth_date: updatedProfile.birthDate || null,
+                            updated_at: new Date().toISOString()
+                        };
+                        const { error } = await supabase.from('profiles').update(updateData).eq('id', updatedProfile.id);
+                        if (error) console.error("Error actualizando en Supabase:", error);
+                    } catch(e) { console.error("Error actualizando en la nube:", e); }
                 } else {
                     this.saveLocalData();
                 }
@@ -219,15 +249,17 @@
         async deleteProfile(index) {
             const profile = this.profiles[index];
             if (!profile) return;
-            
+
             this.profiles.splice(index, 1);
             if (this.activeProfileIndex >= this.profiles.length) {
                 this.activeProfileIndex = Math.max(0, this.profiles.length - 1);
             }
 
-            if (isFirebaseEnabled) {
-                try { await deleteDoc(doc(profilesCollectionRef, profile.id)); }
-                catch(e) { console.error("Error eliminando en la nube:", e); }
+            if (isSupabaseEnabled) {
+                try {
+                    const { error } = await supabase.from('profiles').delete().eq('id', profile.id);
+                    if (error) console.error("Error eliminando en Supabase:", error);
+                } catch(e) { console.error("Error eliminando en la nube:", e); }
             } else {
                 this.saveLocalData();
             }
@@ -313,49 +345,70 @@
         return { view: 'app' };
     }
 
-    async function initFirebase() {
-        if (firebaseConfigStr) {
+    async function initSupabase() {
+        if (SUPABASE_URL && SUPABASE_ANON_KEY) {
             try {
-                const config = JSON.parse(firebaseConfigStr);
-                const app = initializeApp(config);
-                auth = getAuth(app);
-                db = getFirestore(app);
-                profilesCollectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'profiles');
-                isFirebaseEnabled = true;
+                supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+                isSupabaseEnabled = true;
 
-                if (customToken) {
-                    await signInWithCustomToken(auth, customToken);
-                } else {
-                    await signInAnonymously(auth);
-                }
+                // Cargar perfiles desde Supabase
+                await loadProfilesFromSupabase();
 
-                onAuthStateChanged(auth, (user) => {
-                    if (!user) return;
-                    
-                    onSnapshot(profilesCollectionRef, (snapshot) => {
-                        State.profiles = [];
-                        snapshot.forEach(doc => State.profiles.push(doc.data()));
-                        
-                        if (isFirstLoad) {
-                            isFirstLoad = false;
-                            handleInitialRoute();
-                        } else {
-                            if (currentActiveView === 'dashboard') renderDashboard();
-                            else if (currentActiveView === 'admin') renderAdminPanel(document.getElementById('search-input')?.value || '');
-                            else if (currentActiveView === 'welcome' && State.hasProfiles()) renderDashboard();
-                        }
-                    }, (error) => {
-                        console.error("Error syncing with Firestore:", error);
-                        fallbackToLocal();
-                    });
-                });
+                // Suscribirse a cambios en tiempo real
+                supabase.channel('profiles-changes')
+                    .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, async (payload) => {
+                        await loadProfilesFromSupabase();
+                        if (currentActiveView === 'dashboard') renderDashboard();
+                        else if (currentActiveView === 'admin') renderAdminPanel(document.getElementById('search-input')?.value || '');
+                        else if (currentActiveView === 'welcome' && State.hasProfiles()) renderDashboard();
+                    })
+                    .subscribe();
 
             } catch (err) {
-                console.error("Fallo la inicialización de Firebase:", err);
+                console.error("Fallo la inicialización de Supabase:", err);
                 fallbackToLocal();
             }
         } else {
             fallbackToLocal();
+        }
+    }
+
+    async function loadProfilesFromSupabase() {
+        try {
+            const { data, error } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
+            if (error) {
+                console.error("Error cargando perfiles:", error);
+                return;
+            }
+            State.profiles = data.map(p => ({
+                id: p.id,
+                name: p.name,
+                status: p.status,
+                type: p.type,
+                plan: p.plan,
+                photo: p.photo,
+                phone: p.phone,
+                emergencyContact: p.emergency_contact,
+                emergencyPhone: p.emergency_phone,
+                medicalNotes: p.medical_notes,
+                allergies: p.allergies,
+                bloodType: p.blood_type,
+                address: p.address,
+                ownerName: p.owner_name,
+                breed: p.breed,
+                color: p.color,
+                weight: p.weight,
+                birthDate: p.birth_date,
+                createdAt: p.created_at,
+                updatedAt: p.updated_at
+            }));
+
+            if (isFirstLoad) {
+                isFirstLoad = false;
+                handleInitialRoute();
+            }
+        } catch(e) {
+            console.error("Error cargando perfiles:", e);
         }
     }
 
@@ -2201,7 +2254,7 @@
 
     function startApp() {
         State.loadLocalAuth();
-        
+
         const app = document.getElementById('app');
         app.innerHTML = `
             <div class="min-h-screen flex flex-col items-center justify-center bg-slate-50">
@@ -2210,7 +2263,7 @@
             </div>
         `;
 
-        initFirebase();
+        initSupabase();
     }
 
     function init() {
