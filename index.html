@@ -1,5 +1,4 @@
 <!DOCTYPE html>
-
 <html lang="es">
 <head>
     <meta charset="UTF-8">
@@ -46,6 +45,7 @@
 
         /* QR container fix */
         #qr-display canvas, #qr-display img { margin: 0 auto; }
+        #qr-display-pending canvas, #qr-display-pending img { margin: 0 auto; }
         #qr-emergency canvas, #qr-emergency img { margin: 0 auto; }
 
         /* Print styles */
@@ -70,13 +70,6 @@
             background: #f0fdf4;
         }
 
-        /* Tab system */
-        .tab-btn.active {
-            color: #1e40af;
-            border-bottom: 3px solid #1e40af;
-            font-weight: 700;
-        }
-
         /* Modal backdrop */
         .modal-backdrop {
             background: rgba(15, 23, 42, 0.75);
@@ -88,14 +81,15 @@
             box-shadow: 0 0 12px rgba(234, 179, 8, 0.4);
         }
 
-        /* Table hover rows */
-        .table-row:hover { background: #f8fafc; }
-
         /* Secure input */
         .secure-input:focus {
             border-color: #eab308;
             box-shadow: 0 0 0 3px rgba(234, 179, 8, 0.2);
         }
+
+        /* Premium Plan Badge styles */
+        .plan-badge-basic { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
+        .plan-badge-premium { background: #fffbeb; color: #d97706; border: 1px solid #fde68a; }
     </style>
 </head>
 <body class="bg-slate-50 min-h-screen">
@@ -103,9 +97,7 @@
     <!-- ============================================== -->
     <!-- APP CONTAINER                                  -->
     <!-- ============================================== -->
-    <div id="app" class="max-w-lg mx-auto min-h-screen relative"></div>
-
-    <!-- Modal Container -->
+    <div id="app" class="max-w-lg mx-auto min-h-screen relative shadow-2xl shadow-slate-200/50 bg-white"></div>
     <div id="modal-container"></div>
 
     <script type="module">
@@ -116,7 +108,7 @@
     // ====================================================
     // GLOBAL APP STATE & FIREBASE
     // ====================================================
-    let currentActiveView = 'init'; // 'init', 'emergency', 'setup', 'dashboard', 'welcome', 'admin', 'registration'
+    let currentActiveView = 'init';
     let isFirstLoad = true;
     let isFirebaseEnabled = false;
     let db, auth, profilesCollectionRef;
@@ -140,7 +132,7 @@
     const APP_KEY = 'emergencyID_v3';
     const ADMIN_KEY = 'emergencyID_admin';
     const SESSION_KEY = 'emergencyID_session';
-    const USER_FILLED_KEY = 'emergencyID_filled'; // Evita que usuarios sigan haciendo cambios locales
+    const USER_FILLED_KEY = 'emergencyID_filled';
 
     // ====================================================
     // STATE MANAGEMENT (Syncs with Firebase)
@@ -184,6 +176,7 @@
             }
             profile.createdAt = new Date().toISOString();
             if (!profile.status) profile.status = 'active';
+            if (!profile.plan) profile.plan = 'premium'; // Default to premium if not specified
 
             // Optimistic update
             this.profiles.push(profile);
@@ -198,12 +191,13 @@
             return profile;
         },
 
-        async generateEmptyProfile() {
+        async generateEmptyProfile(planType = 'premium') {
             const profile = {
                 id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
                 name: 'Código Vacío',
                 status: 'pending',
-                type: 'person'
+                type: 'person',
+                plan: planType // 'basic' o 'premium'
             };
             await this.addProfile(profile, true);
         },
@@ -338,7 +332,6 @@
                 onAuthStateChanged(auth, (user) => {
                     if (!user) return;
                     
-                    // Escuchar cambios en la nube en Tiempo Real
                     onSnapshot(profilesCollectionRef, (snapshot) => {
                         State.profiles = [];
                         snapshot.forEach(doc => State.profiles.push(doc.data()));
@@ -347,7 +340,6 @@
                             isFirstLoad = false;
                             handleInitialRoute();
                         } else {
-                            // Live Reload de la vista del administrador si está en pantalla
                             if (currentActiveView === 'dashboard') renderDashboard();
                             else if (currentActiveView === 'admin') renderAdminPanel(document.getElementById('search-input')?.value || '');
                             else if (currentActiveView === 'welcome' && State.hasProfiles()) renderDashboard();
@@ -546,7 +538,7 @@
     }
 
     // ====================================================
-    // UI: EMERGENCY VIEW
+    // UI: EMERGENCY VIEW (WITH BASIC/PREMIUM LOGIC)
     // ====================================================
     function decodeProfileFromQR(data) {
         try {
@@ -585,15 +577,19 @@
         }
 
         const isPet = profile.type === 'pet';
+        const isPremium = profile.plan !== 'basic'; // Por defecto es premium para perfiles antiguos
         const typeLabel = isPet ? 'Mascota' : 'Persona';
         const typeIcon = isPet ? 'paw-print' : 'user';
-        const photoHTML = profile.photo
+        
+        // La foto solo se muestra si es Premium. Si es Básico, mostramos un ícono genérico.
+        const photoHTML = (isPremium && profile.photo)
             ? `<img src="${profile.photo}" alt="Foto" class="w-28 h-28 rounded-full object-cover border-4 border-white shadow-lg">`
             : `<div class="w-28 h-28 rounded-full bg-white/20 flex items-center justify-center border-4 border-white/40">
                  <i data-lucide="${typeIcon}" class="w-14 h-14 text-white/80"></i>
                </div>`;
 
-        const medicalHTML = profile.medicalNotes ? `
+        // Solo renderizar bloques Premium si el plan no es básico
+        const medicalHTML = (isPremium && profile.medicalNotes) ? `
             <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 slide-up" style="animation-delay: 0.2s">
                 <div class="flex items-center gap-2 mb-2">
                     <i data-lucide="heart-pulse" class="w-5 h-5 text-amber-600"></i>
@@ -602,7 +598,7 @@
                 <p class="text-amber-900 text-sm leading-relaxed">${escapeHTML(profile.medicalNotes)}</p>
             </div>` : '';
 
-        const addressHTML = profile.address ? `
+        const addressHTML = (isPremium && profile.address) ? `
             <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 slide-up" style="animation-delay: 0.25s">
                 <div class="flex items-center gap-2 mb-1">
                     <i data-lucide="map-pin" class="w-5 h-5 text-blue-600"></i>
@@ -611,7 +607,7 @@
                 <p class="text-blue-900 text-sm">${escapeHTML(profile.address)}</p>
             </div>` : '';
 
-        const petOwnerHTML = isPet && profile.ownerName ? `
+        const petOwnerHTML = (isPet && profile.ownerName) ? `
             <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 slide-up" style="animation-delay: 0.15s">
                 <div class="flex items-center gap-2 mb-1">
                     <i data-lucide="user" class="w-5 h-5 text-slate-600"></i>
@@ -620,7 +616,7 @@
                 <p class="text-slate-900 font-medium">${escapeHTML(profile.ownerName)}</p>
             </div>` : '';
 
-        const petDetailsHTML = isPet ? `
+        const petDetailsHTML = (isPremium && isPet) ? `
             ${profile.breed ? `<div class="flex justify-between py-2 border-b border-slate-100">
                 <span class="text-slate-500 text-sm">Raza</span>
                 <span class="text-slate-800 font-medium text-sm">${escapeHTML(profile.breed)}</span>
@@ -635,13 +631,13 @@
             </div>` : ''}
         ` : '';
 
-        const bloodTypeHTML = !isPet && profile.bloodType ? `
+        const bloodTypeHTML = (isPremium && !isPet && profile.bloodType) ? `
             <div class="flex justify-between py-2 border-b border-slate-100">
                 <span class="text-slate-500 text-sm">Tipo de Sangre</span>
                 <span class="text-slate-800 font-bold text-sm bg-red-50 px-3 py-0.5 rounded-full text-red-700">${escapeHTML(profile.bloodType)}</span>
             </div>` : '';
 
-        const allergiesHTML = profile.allergies ? `
+        const allergiesHTML = (isPremium && profile.allergies) ? `
             <div class="bg-red-50 border border-red-200 rounded-xl p-4 slide-up" style="animation-delay: 0.3s">
                 <div class="flex items-center gap-2 mb-2">
                     <i data-lucide="shield-alert" class="w-5 h-5 text-red-600"></i>
@@ -658,9 +654,22 @@
             </div>
         ` : '';
 
+        // El bloque de "Datos" solo se muestra si hay algo que mostrar (Dueño o detalles premium)
+        const hasDataBlock = (petOwnerHTML !== '' || petDetailsHTML !== '' || bloodTypeHTML !== '');
+        const dataBlockHTML = hasDataBlock ? `
+            <div class="bg-white rounded-2xl shadow-lg shadow-slate-200/60 border border-slate-100 p-4 slide-up" style="animation-delay: 0.1s">
+                <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                    <i data-lucide="clipboard-list" class="w-3.5 h-3.5"></i> Datos
+                </h2>
+                ${bloodTypeHTML}
+                ${petDetailsHTML}
+                ${petOwnerHTML}
+            </div>
+        ` : '';
+
         app.innerHTML = `
             <div class="min-h-screen bg-white">
-                <div class="bg-gradient-to-br from-red-600 via-red-700 to-red-800 text-white pt-10 pb-16 px-6 text-center relative overflow-hidden">
+                <div class="bg-gradient-to-br ${isPremium ? 'from-red-600 via-red-700 to-red-800' : 'from-indigo-600 via-indigo-700 to-indigo-800'} text-white pt-10 pb-16 px-6 text-center relative overflow-hidden transition-colors">
                     <div class="absolute inset-0 opacity-10">
                         <div class="absolute top-4 left-4 w-32 h-32 border border-white/30 rounded-full"></div>
                         <div class="absolute bottom-4 right-4 w-48 h-48 border border-white/20 rounded-full"></div>
@@ -668,7 +677,7 @@
                     <div class="relative z-10">
                         <div class="flex items-center justify-center gap-2 mb-4">
                             <i data-lucide="shield-check" class="w-5 h-5"></i>
-                            <span class="text-xs font-bold uppercase tracking-[0.2em] text-red-200">Ficha de Emergencia</span>
+                            <span class="text-xs font-bold uppercase tracking-[0.2em] text-white/80">Ficha de Emergencia ${!isPremium ? 'Básica' : ''}</span>
                         </div>
                         <div class="flex justify-center mb-4 fade-in">
                             ${photoHTML}
@@ -684,7 +693,7 @@
                 <div class="px-5 -mt-8 pb-8 space-y-4 relative z-10">
                     <div class="bg-white rounded-2xl shadow-lg shadow-slate-200/60 border border-slate-100 p-4 slide-up">
                         <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                            <i data-lucide="phone" class="w-3.5 h-3.5"></i> Contacto de Emergencia
+                            <i data-lucide="phone" class="w-3.5 h-3.5"></i> Contactos de Emergencia
                         </h2>
                         <a href="tel:${escapeHTML(profile.phone)}"
                            class="flex items-center gap-3 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white font-bold py-4 px-5 rounded-xl transition-all emergency-pulse mb-3 w-full">
@@ -725,15 +734,7 @@
                         </button>
                     </div>
 
-                    <div class="bg-white rounded-2xl shadow-lg shadow-slate-200/60 border border-slate-100 p-4 slide-up" style="animation-delay: 0.1s">
-                        <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                            <i data-lucide="clipboard-list" class="w-3.5 h-3.5"></i> Datos
-                        </h2>
-                        ${bloodTypeHTML}
-                        ${petDetailsHTML}
-                        ${petOwnerHTML}
-                    </div>
-
+                    ${dataBlockHTML}
                     ${medicalHTML}
                     ${allergiesHTML}
                     ${addressHTML}
@@ -751,13 +752,13 @@
     }
 
     // ====================================================
-    // UI: REGISTRATION FORM
+    // UI: REGISTRATION FORM (DYNAMIC FOR BASIC/PREMIUM)
     // ====================================================
     function renderRegistration(editIndex = null, assignId = null) {
         currentActiveView = 'registration';
         const isEdit = editIndex !== null;
         const isSetup = assignId !== null;
-        const profile = isEdit ? State.profiles[editIndex] : null;
+        const profile = isEdit ? State.profiles[editIndex] : (isSetup ? State.getProfileById(assignId) : null);
         const app = document.getElementById('app');
 
         if (safeStorage.getLocal(USER_FILLED_KEY) === 'true' && !AdminAuth.isLoggedIn()) {
@@ -767,9 +768,20 @@
             return;
         }
 
+        // Determinar el plan inicial
+        const initialPlan = (profile && profile.plan) ? profile.plan : 'premium';
+        window._selectedPlan = initialPlan;
+        
+        // Determinar el tipo inicial
+        const initialType = (profile && profile.type) ? profile.type : 'person';
+        window._selectedType = initialType;
+
+        // Si es un setup de un QR pendiente que ya tiene un plan asignado, no dejamos cambiarlo
+        const lockPlan = (isSetup && profile && profile.plan);
+
         app.innerHTML = `
-            <div class="min-h-screen bg-gradient-to-b from-slate-50 to-white">
-                <div class="bg-white border-b border-slate-200 px-5 py-4 sticky top-0 z-20 shadow-sm">
+            <div class="min-h-screen bg-gradient-to-b from-slate-50 to-white pb-10">
+                <div class="bg-white border-b border-slate-200 px-5 py-4 sticky top-0 z-20 shadow-sm flex items-center justify-between">
                     <div class="flex items-center gap-3">
                         ${isEdit || State.hasProfiles() ? `
                         <button onclick="backToDashboardOrEmergency()" class="p-2 -ml-2 rounded-lg hover:bg-slate-100 transition-colors">
@@ -783,6 +795,31 @@
                 </div>
 
                 <div class="p-5 fade-in">
+                    <!-- Selector de Plan -->
+                    <div class="mb-6 ${lockPlan ? 'hidden' : ''}">
+                        <label class="block text-sm font-bold text-slate-700 mb-2">Tipo de Plan</label>
+                        <div class="grid grid-cols-2 gap-3 bg-slate-100 p-1.5 rounded-xl">
+                            <button type="button" onclick="selectPlan('basic')" id="btn-plan-basic"
+                                class="py-2.5 rounded-lg text-sm font-bold transition-all ${initialPlan === 'basic' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}">
+                                Básico
+                            </button>
+                            <button type="button" onclick="selectPlan('premium')" id="btn-plan-premium"
+                                class="py-2.5 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-1.5 ${initialPlan === 'premium' ? 'bg-white text-amber-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}">
+                                <i data-lucide="star" class="w-4 h-4"></i> Premium
+                            </button>
+                        </div>
+                        <p class="text-xs text-slate-500 mt-2 text-center" id="plan-desc">
+                            ${initialPlan === 'basic' ? 'Solo información de contacto de emergencia.' : 'Incluye datos médicos, dirección y fotos.'}
+                        </p>
+                    </div>
+
+                    ${lockPlan ? `
+                    <div class="mb-6 bg-slate-100 rounded-xl p-3 flex items-center justify-center gap-2">
+                        <i data-lucide="${initialPlan === 'premium' ? 'star' : 'shield'}" class="w-4 h-4 ${initialPlan === 'premium' ? 'text-amber-500' : 'text-indigo-500'}"></i>
+                        <span class="text-sm font-bold text-slate-700">Completando QR ${initialPlan === 'premium' ? 'Premium' : 'Básico'}</span>
+                    </div>
+                    ` : ''}
+
                     <div class="mb-6">
                         <label class="block text-sm font-bold text-slate-700 mb-2">Tipo de perfil</label>
                         <div class="grid grid-cols-2 gap-3">
@@ -800,8 +837,10 @@
                     </div>
 
                     <form id="registration-form" class="space-y-5" onsubmit="handleSubmit(event, ${editIndex}, ${assignId ? `'${assignId}'` : 'null'})">
-                        <div>
-                            <label class="block text-sm font-bold text-slate-700 mb-2">Foto (opcional)</label>
+                        
+                        <!-- Bloque de Foto (PREMIUM ONLY) -->
+                        <div class="premium-feature">
+                            <label class="block text-sm font-bold text-slate-700 mb-2">Foto (Premium)</label>
                             <div class="photo-upload rounded-xl p-6 text-center" id="photo-area" onclick="document.getElementById('photo-input').click()">
                                 <div id="photo-preview-area">
                                     <i data-lucide="camera" class="w-8 h-8 text-slate-300 mx-auto mb-2"></i>
@@ -828,17 +867,17 @@
                             <input type="text" id="ownerName"
                                 class="w-full px-4 py-3 rounded-xl border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all text-slate-800"
                                 placeholder="Tu nombre"
-                                value="${isEdit && profile.ownerName ? escapeHTML(profile.ownerName) : ''}">
+                                value="${(isEdit || isSetup) && profile?.ownerName ? escapeHTML(profile.ownerName) : ''}">
                         </div>
 
                         <div>
                             <label for="phone" class="block text-sm font-bold text-slate-700 mb-1.5">
-                                Teléfono principal <span class="text-red-500">*</span>
+                                Teléfono de Emergencia <span class="text-red-500">*</span>
                             </label>
                             <input type="tel" id="phone" required
                                 class="w-full px-4 py-3 rounded-xl border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all text-slate-800"
                                 placeholder="+52 55 1234 5678"
-                                value="${isEdit && profile.phone ? escapeHTML(profile.phone) : ''}">
+                                value="${(isEdit || isSetup) && profile?.phone ? escapeHTML(profile.phone) : ''}">
                         </div>
 
                         <div>
@@ -848,24 +887,25 @@
                             <input type="tel" id="phoneAlt"
                                 class="w-full px-4 py-3 rounded-xl border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all text-slate-800"
                                 placeholder="Otro número de contacto"
-                                value="${isEdit && profile.phoneAlt ? escapeHTML(profile.phoneAlt) : ''}">
+                                value="${(isEdit || isSetup) && profile?.phoneAlt ? escapeHTML(profile.phoneAlt) : ''}">
                         </div>
 
-                        <div id="pet-fields" class="hidden space-y-5">
+                        <!-- Bloques PREMIUM de Mascotas -->
+                        <div id="pet-fields" class="hidden space-y-5 premium-feature">
                             <div class="grid grid-cols-2 gap-3">
                                 <div>
                                     <label for="breed" class="block text-sm font-bold text-slate-700 mb-1.5">Raza</label>
                                     <input type="text" id="breed"
                                         class="w-full px-4 py-3 rounded-xl border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all text-slate-800"
                                         placeholder="Ej: Labrador"
-                                        value="${isEdit && profile.breed ? escapeHTML(profile.breed) : ''}">
+                                        value="${(isEdit || isSetup) && profile?.breed ? escapeHTML(profile.breed) : ''}">
                                 </div>
                                 <div>
                                     <label for="color" class="block text-sm font-bold text-slate-700 mb-1.5">Color</label>
                                     <input type="text" id="color"
                                         class="w-full px-4 py-3 rounded-xl border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all text-slate-800"
                                         placeholder="Ej: Negro"
-                                        value="${isEdit && profile.color ? escapeHTML(profile.color) : ''}">
+                                        value="${(isEdit || isSetup) && profile?.color ? escapeHTML(profile.color) : ''}">
                                 </div>
                             </div>
                             <div>
@@ -873,54 +913,55 @@
                                 <input type="text" id="weight"
                                     class="w-full px-4 py-3 rounded-xl border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all text-slate-800"
                                     placeholder="Ej: 12 kg"
-                                    value="${isEdit && profile.weight ? escapeHTML(profile.weight) : ''}">
+                                    value="${(isEdit || isSetup) && profile?.weight ? escapeHTML(profile.weight) : ''}">
                             </div>
                         </div>
 
-                        <div id="person-fields" class="hidden">
+                        <!-- Bloques PREMIUM de Personas -->
+                        <div id="person-fields" class="hidden premium-feature">
                             <label for="bloodType" class="block text-sm font-bold text-slate-700 mb-1.5">Tipo de sangre</label>
                             <select id="bloodType"
                                 class="w-full px-4 py-3 rounded-xl border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all text-slate-800 bg-white">
                                 <option value="">Seleccionar...</option>
-                                <option value="A+" ${isEdit && profile && profile.bloodType === 'A+' ? 'selected' : ''}>A+</option>
-                                <option value="A-" ${isEdit && profile && profile.bloodType === 'A-' ? 'selected' : ''}>A-</option>
-                                <option value="B+" ${isEdit && profile && profile.bloodType === 'B+' ? 'selected' : ''}>B+</option>
-                                <option value="B-" ${isEdit && profile && profile.bloodType === 'B-' ? 'selected' : ''}>B-</option>
-                                <option value="AB+" ${isEdit && profile && profile.bloodType === 'AB+' ? 'selected' : ''}>AB+</option>
-                                <option value="AB-" ${isEdit && profile && profile.bloodType === 'AB-' ? 'selected' : ''}>AB-</option>
-                                <option value="O+" ${isEdit && profile && profile.bloodType === 'O+' ? 'selected' : ''}>O+</option>
-                                <option value="O-" ${isEdit && profile && profile.bloodType === 'O-' ? 'selected' : ''}>O-</option>
+                                <option value="A+" ${(isEdit || isSetup) && profile && profile.bloodType === 'A+' ? 'selected' : ''}>A+</option>
+                                <option value="A-" ${(isEdit || isSetup) && profile && profile.bloodType === 'A-' ? 'selected' : ''}>A-</option>
+                                <option value="B+" ${(isEdit || isSetup) && profile && profile.bloodType === 'B+' ? 'selected' : ''}>B+</option>
+                                <option value="B-" ${(isEdit || isSetup) && profile && profile.bloodType === 'B-' ? 'selected' : ''}>B-</option>
+                                <option value="AB+" ${(isEdit || isSetup) && profile && profile.bloodType === 'AB+' ? 'selected' : ''}>AB+</option>
+                                <option value="AB-" ${(isEdit || isSetup) && profile && profile.bloodType === 'AB-' ? 'selected' : ''}>AB-</option>
+                                <option value="O+" ${(isEdit || isSetup) && profile && profile.bloodType === 'O+' ? 'selected' : ''}>O+</option>
+                                <option value="O-" ${(isEdit || isSetup) && profile && profile.bloodType === 'O-' ? 'selected' : ''}>O-</option>
                             </select>
                         </div>
 
-                        <div>
+                        <div class="premium-feature">
                             <label for="address" class="block text-sm font-bold text-slate-700 mb-1.5">Dirección</label>
                             <input type="text" id="address"
                                 class="w-full px-4 py-3 rounded-xl border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all text-slate-800"
                                 placeholder="Dirección del hogar"
-                                value="${isEdit && profile.address ? escapeHTML(profile.address) : ''}">
+                                value="${(isEdit || isSetup) && profile?.address ? escapeHTML(profile.address) : ''}">
                         </div>
 
-                        <div>
+                        <div class="premium-feature">
                             <label for="medicalNotes" class="block text-sm font-bold text-slate-700 mb-1.5">
                                 Notas médicas
                             </label>
                             <textarea id="medicalNotes" rows="3"
                                 class="w-full px-4 py-3 rounded-xl border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all text-slate-800 resize-none"
-                                placeholder="Condiciones, medicamentos, etc.">${isEdit && profile.medicalNotes ? escapeHTML(profile.medicalNotes) : ''}</textarea>
+                                placeholder="Condiciones, medicamentos, etc.">${(isEdit || isSetup) && profile?.medicalNotes ? escapeHTML(profile.medicalNotes) : ''}</textarea>
                         </div>
 
-                        <div>
+                        <div class="premium-feature">
                             <label for="allergies" class="block text-sm font-bold text-slate-700 mb-1.5">
                                 Alergias
                             </label>
                             <textarea id="allergies" rows="2"
                                 class="w-full px-4 py-3 rounded-xl border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all text-slate-800 resize-none"
-                                placeholder="Alergias conocidas">${isEdit && profile.allergies ? escapeHTML(profile.allergies) : ''}</textarea>
+                                placeholder="Alergias conocidas">${(isEdit || isSetup) && profile?.allergies ? escapeHTML(profile.allergies) : ''}</textarea>
                         </div>
 
                         <button type="submit" id="btn-submit-form"
-                            class="w-full bg-blue-700 hover:bg-blue-800 active:bg-blue-900 text-white font-bold py-4 px-6 rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-blue-700/25">
+                            class="w-full bg-blue-700 hover:bg-blue-800 active:bg-blue-900 text-white font-bold py-4 px-6 rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-blue-700/25 mt-6">
                             <i data-lucide="${isEdit ? 'save' : 'check-circle'}" class="w-5 h-5"></i>
                             ${isEdit ? 'Guardar Cambios' : (isSetup ? 'Activar Código QR' : 'Crear Ficha de Emergencia')}
                         </button>
@@ -931,11 +972,11 @@
 
         lucide.createIcons();
 
-        const initialType = isEdit ? profile.type : 'person';
-        window._selectedType = initialType;
+        // Aplicar configuraciones visuales iniciales
         selectType(initialType);
+        selectPlan(initialPlan);
 
-        if (isEdit && profile.photo) {
+        if ((isEdit || isSetup) && profile && profile.photo) {
             window._currentPhoto = profile.photo;
             const photoArea = document.getElementById('photo-preview-area');
             const photoContainer = document.getElementById('photo-area');
@@ -945,6 +986,40 @@
         } else {
             window._currentPhoto = null;
         }
+    }
+
+    function selectPlan(plan) {
+        window._selectedPlan = plan;
+        const btnBasic = document.getElementById('btn-plan-basic');
+        const btnPremium = document.getElementById('btn-plan-premium');
+        const desc = document.getElementById('plan-desc');
+        
+        if (btnBasic && btnPremium) {
+            if (plan === 'basic') {
+                btnBasic.className = 'py-2.5 rounded-lg text-sm font-bold transition-all bg-white text-indigo-700 shadow-sm';
+                btnPremium.className = 'py-2.5 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-1.5 text-slate-500 hover:text-slate-700';
+                if(desc) desc.textContent = 'Solo información de contacto de emergencia.';
+            } else {
+                btnBasic.className = 'py-2.5 rounded-lg text-sm font-bold transition-all text-slate-500 hover:text-slate-700';
+                btnPremium.className = 'py-2.5 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-1.5 bg-white text-amber-600 shadow-sm';
+                if(desc) desc.textContent = 'Incluye datos médicos, dirección y fotos.';
+            }
+        }
+
+        // Mostrar/Ocultar campos premium
+        document.querySelectorAll('.premium-feature').forEach(el => {
+            if (plan === 'basic') {
+                el.classList.add('hidden');
+            } else {
+                // Remove hidden solo si no está en un contenedor oculto padre
+                // Para pet-fields/person-fields la visibilidad se maneja en selectType, 
+                // así que solo quitamos hidden si corresponde
+                el.classList.remove('hidden');
+            }
+        });
+        
+        // Re-aplicar visibilidad de tipo (person/pet) por si algún contenedor premium se sobreescribió
+        selectType(window._selectedType);
     }
 
     function selectType(type) {
@@ -965,13 +1040,15 @@
         if (type === 'person') {
             btnPerson.classList.add('border-blue-500', 'bg-blue-50');
             btnPerson.classList.remove('border-slate-200', 'bg-white');
+            if(window._selectedPlan === 'premium') personFields.classList.remove('hidden');
+            else personFields.classList.add('hidden');
             petFields.classList.add('hidden');
-            personFields.classList.remove('hidden');
             ownerField.classList.add('hidden');
         } else {
             btnPet.classList.add('border-blue-500', 'bg-blue-50');
             btnPet.classList.remove('border-slate-200', 'bg-white');
-            petFields.classList.remove('hidden');
+            if(window._selectedPlan === 'premium') petFields.classList.remove('hidden');
+            else petFields.classList.add('hidden');
             personFields.classList.add('hidden');
             ownerField.classList.remove('hidden');
         }
@@ -1016,27 +1093,36 @@
         btnSubmit.innerHTML = `<i data-lucide="loader-2" class="w-5 h-5 animate-spin"></i> Guardando...`;
         lucide.createIcons();
 
+        // Recolectar datos. Si es plan básico, ignoramos los campos premium
         const data = {
             type: window._selectedType,
+            plan: window._selectedPlan,
             name: document.getElementById('name').value.trim(),
             phone: document.getElementById('phone').value.trim(),
-            phoneAlt: document.getElementById('phoneAlt').value.trim(),
-            address: document.getElementById('address').value.trim(),
-            medicalNotes: document.getElementById('medicalNotes').value.trim(),
-            allergies: document.getElementById('allergies').value.trim(),
-            photo: window._currentPhoto || null
+            phoneAlt: document.getElementById('phoneAlt').value.trim()
         };
 
         if (window._selectedType === 'pet') {
             data.ownerName = document.getElementById('ownerName').value.trim();
-            data.breed = document.getElementById('breed').value.trim();
-            data.color = document.getElementById('color').value.trim();
-            data.weight = document.getElementById('weight').value.trim();
-        } else {
-            data.bloodType = document.getElementById('bloodType').value;
         }
 
-        if (!data.name || !data.phone) {
+        // Agregar campos premium solo si el plan es premium
+        if (window._selectedPlan === 'premium') {
+            data.address = document.getElementById('address').value.trim();
+            data.medicalNotes = document.getElementById('medicalNotes').value.trim();
+            data.allergies = document.getElementById('allergies').value.trim();
+            data.photo = window._currentPhoto || null;
+            
+            if (window._selectedType === 'pet') {
+                data.breed = document.getElementById('breed').value.trim();
+                data.color = document.getElementById('color').value.trim();
+                data.weight = document.getElementById('weight').value.trim();
+            } else {
+                data.bloodType = document.getElementById('bloodType').value;
+            }
+        }
+
+        if (!data.name || !data.phone || (data.type === 'pet' && !data.ownerName)) {
             showToast('Completa los campos obligatorios', 'error');
             btnSubmit.disabled = false;
             btnSubmit.innerHTML = originalText;
@@ -1075,7 +1161,7 @@
 
         if (!AdminAuth.isLoggedIn() && assignId) {
             renderEmergencyView(savedProfileId);
-            showToast('Ficha enviada al Administrador de manera segura', 'success');
+            showToast('Ficha activada de manera segura', 'success');
         } else {
             renderDashboard();
             showToast(editIndex !== null ? 'Perfil actualizado' : 'Ficha creada exitosamente', 'success');
@@ -1093,7 +1179,7 @@
     }
 
     // ====================================================
-    // UI: DASHBOARD
+    // UI: DASHBOARD (ADMIN VIEW)
     // ====================================================
     function renderDashboard() {
         currentActiveView = 'dashboard';
@@ -1116,6 +1202,7 @@
 
         const isPet = profile.type === 'pet';
         const isPending = profile.status === 'pending';
+        const isPremium = profile.plan !== 'basic';
         const typeIcon = isPending ? 'qr-code' : (isPet ? 'paw-print' : 'user');
         const emergencyURL = buildEmergencyURL(profile.id);
         const emergencyPortableURL = buildEmergencyURLWithData(profile);
@@ -1124,28 +1211,33 @@
         const profileCards = State.profiles.map((p, i) => {
             const isActive = i === State.activeProfileIndex;
             const pIsPending = p.status === 'pending';
+            const pIsPremium = p.plan !== 'basic';
             const icon = pIsPending ? 'qr-code' : (p.type === 'pet' ? 'paw-print' : 'user');
             const nameDisplay = pIsPending ? 'Código Vacío' : escapeHTML(p.name);
             const typeDisplay = pIsPending ? 'Pendiente' : (p.type === 'pet' ? 'Mascota' : 'Persona');
+            const planColor = pIsPremium ? 'text-amber-500' : 'text-indigo-500';
             
             return `
                 <button onclick="switchProfile(${i})"
                     class="flex items-center gap-3 p-3 rounded-xl border-2 transition-all shrink-0 ${isActive
                         ? 'border-blue-500 bg-blue-50'
                         : 'border-slate-200 bg-white hover:border-slate-300'}">
-                    ${p.photo && !pIsPending
+                    ${p.photo && !pIsPending && pIsPremium
                         ? `<img src="${p.photo}" class="w-10 h-10 rounded-full object-cover shrink-0">`
                         : `<div class="w-10 h-10 rounded-full ${isActive ? 'bg-blue-200' : 'bg-slate-200'} flex items-center justify-center shrink-0">
                              <i data-lucide="${icon}" class="w-5 h-5 ${isActive ? 'text-blue-700' : 'text-slate-500'}"></i>
                            </div>`}
                     <div class="text-left min-w-0">
-                        <p class="text-sm font-bold ${isActive ? 'text-blue-800' : 'text-slate-700'} truncate">${nameDisplay}</p>
+                        <div class="flex items-center gap-1.5">
+                            <p class="text-sm font-bold ${isActive ? 'text-blue-800' : 'text-slate-700'} truncate">${nameDisplay}</p>
+                            <i data-lucide="${pIsPremium ? 'star' : 'shield'}" class="w-3 h-3 ${planColor}"></i>
+                        </div>
                         <p class="text-xs ${isActive ? 'text-blue-500' : 'text-slate-400'}">${typeDisplay}</p>
                     </div>
                 </button>`;
         }).join('');
 
-        const photoHTML = profile.photo && !isPending
+        const photoHTML = profile.photo && !isPending && isPremium
             ? `<img src="${profile.photo}" alt="${escapeHTML(profile.name)}" class="w-16 h-16 rounded-2xl object-cover border-2 border-white shadow">`
             : `<div class="w-16 h-16 rounded-2xl bg-blue-100 flex items-center justify-center border-2 border-white shadow">
                  <i data-lucide="${typeIcon}" class="w-8 h-8 text-blue-600"></i>
@@ -1155,20 +1247,23 @@
 
         if (isPending) {
             mainContentHTML = `
-                <div class="bg-indigo-50 rounded-2xl shadow-sm border border-indigo-200 p-5 text-center relative overflow-hidden">
-                    <div class="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                        <i data-lucide="qr-code" class="w-8 h-8 text-indigo-600"></i>
+                <div class="${isPremium ? 'bg-amber-50 border-amber-200' : 'bg-indigo-50 border-indigo-200'} rounded-2xl shadow-sm border p-5 text-center relative overflow-hidden transition-colors">
+                    <div class="w-16 h-16 ${isPremium ? 'bg-amber-100' : 'bg-indigo-100'} rounded-full flex items-center justify-center mx-auto mb-3">
+                        <i data-lucide="qr-code" class="w-8 h-8 ${isPremium ? 'text-amber-600' : 'text-indigo-600'}"></i>
                     </div>
-                    <h2 class="text-xl font-black text-indigo-800 mb-1">Código Pendiente</h2>
-                    <p class="text-sm text-indigo-600 mb-4 px-2">Este código QR aún no tiene datos. Imprímelo para que el usuario lo escanee desde su celular. <b>Los datos se te enviarán automáticamente en cuanto se llene.</b></p>
+                    <h2 class="text-xl font-black ${isPremium ? 'text-amber-800' : 'text-indigo-800'} mb-1 flex justify-center items-center gap-2">
+                        Código Pendiente 
+                        <span class="text-xs font-bold px-2 py-0.5 rounded-full ${isPremium ? 'bg-amber-200 text-amber-800' : 'bg-indigo-200 text-indigo-800'}">${isPremium ? 'Premium' : 'Básico'}</span>
+                    </h2>
+                    <p class="text-sm ${isPremium ? 'text-amber-700' : 'text-indigo-600'} mb-4 px-2">Este código QR aún no tiene datos. Imprímelo para que el usuario lo escanee y llene su ficha <b>${isPremium ? 'Premium completa' : 'Básica'}</b>.</p>
                     
-                    <div class="bg-white p-4 rounded-xl border border-indigo-100 mb-4 flex justify-center">
+                    <div class="bg-white p-4 rounded-xl border border-slate-100 mb-4 flex justify-center shadow-sm">
                         <div id="qr-display-pending"></div>
                     </div>
                     <p class="text-[10px] text-slate-400 font-mono break-all px-2 mb-4">${escapeHTML(setupURL)}</p>
                     
                     <div class="grid grid-cols-2 gap-2 mb-4">
-                        <button onclick="downloadQRPending()" class="flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm transition-colors">
+                        <button onclick="downloadQRPending()" class="flex items-center justify-center gap-1.5 py-2.5 rounded-xl ${isPremium ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700'} text-white font-semibold text-sm transition-colors">
                             <i data-lucide="download" class="w-4 h-4"></i> Descargar
                         </button>
                         <button onclick="printQR()" class="flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-800 text-white font-semibold text-sm transition-colors">
@@ -1176,8 +1271,8 @@
                         </button>
                     </div>
 
-                    <div class="pt-4 border-t border-indigo-100/50">
-                        <button onclick="handleEditProfile(${State.activeProfileIndex})" class="w-full flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-dashed border-indigo-300 text-indigo-600 font-semibold text-sm hover:border-indigo-400 hover:bg-white transition-all">
+                    <div class="pt-4 border-t ${isPremium ? 'border-amber-200' : 'border-indigo-200'}">
+                        <button onclick="handleEditProfile(${State.activeProfileIndex})" class="w-full flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-dashed ${isPremium ? 'border-amber-300 text-amber-600 hover:border-amber-400' : 'border-indigo-300 text-indigo-600 hover:border-indigo-400'} font-semibold text-sm hover:bg-white transition-all">
                             <i data-lucide="pencil" class="w-4 h-4"></i>
                             Llenar datos manualmente ahora
                         </button>
@@ -1190,23 +1285,29 @@
             `;
             setTimeout(() => {
                 const pendingQR = document.getElementById('qr-display-pending');
+                const colorD = isPremium ? '#b45309' : '#3730a3';
                 if (pendingQR) {
-                    new QRCode(pendingQR, { text: setupURL, width: 200, height: 200, colorDark: '#3730a3', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.H });
+                    new QRCode(pendingQR, { text: setupURL, width: 200, height: 200, colorDark: colorD, colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.H });
                 }
             }, 100);
         } else {
             mainContentHTML = `
-                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
-                    <div class="flex items-start justify-between mb-4">
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 relative overflow-hidden">
+                    <div class="absolute top-0 right-0 p-3">
+                        <span class="text-xs font-bold px-2 py-1 rounded-full flex items-center gap-1 ${isPremium ? 'plan-badge-premium' : 'plan-badge-basic'}">
+                            <i data-lucide="${isPremium ? 'star' : 'shield'}" class="w-3 h-3"></i> ${isPremium ? 'Premium' : 'Básico'}
+                        </span>
+                    </div>
+                    <div class="flex items-start justify-between mb-4 mt-2">
                         <div class="flex items-center gap-4">
                             ${photoHTML}
                             <div>
-                                <h2 class="text-xl font-black text-slate-800">${escapeHTML(profile.name)}</h2>
+                                <h2 class="text-xl font-black text-slate-800 pr-16">${escapeHTML(profile.name)}</h2>
                                 <div class="flex items-center gap-1.5 mt-0.5">
                                     <span class="text-xs font-semibold px-2 py-0.5 rounded-full ${isPet ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}">
                                         ${isPet ? '🐾 Mascota' : '👤 Persona'}
                                     </span>
-                                    ${!isPet && profile.bloodType ? `<span class="text-xs font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">${escapeHTML(profile.bloodType)}</span>` : ''}
+                                    ${!isPet && isPremium && profile.bloodType ? `<span class="text-xs font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">${escapeHTML(profile.bloodType)}</span>` : ''}
                                 </div>
                             </div>
                         </div>
@@ -1222,7 +1323,7 @@
                             <i data-lucide="phone" class="w-4 h-4 text-slate-400"></i>
                             <span>${escapeHTML(profile.phoneAlt)} (alt.)</span>
                         </div>` : ''}
-                        ${profile.address ? `
+                        ${isPremium && profile.address ? `
                         <div class="flex items-center gap-2 text-sm text-slate-600">
                             <i data-lucide="map-pin" class="w-4 h-4 text-slate-400"></i>
                             <span>${escapeHTML(profile.address)}</span>
@@ -1253,7 +1354,7 @@
                         <p class="text-xs text-slate-400">Escanea para ver la ficha de emergencia</p>
                     </div>
 
-                    <div class="bg-white p-4 rounded-xl border border-slate-100 mb-4 flex justify-center">
+                    <div class="bg-white p-4 rounded-xl border border-slate-100 mb-4 flex justify-center shadow-sm">
                         <div id="qr-display"></div>
                     </div>
 
@@ -1291,30 +1392,35 @@
         }
 
         app.innerHTML = `
-            <div class="min-h-screen bg-slate-50">
+            <div class="min-h-screen bg-slate-50 pb-10">
                 <div class="bg-white border-b border-slate-200 px-5 py-3">
                     <div class="flex items-center justify-between">
                         <div class="flex items-center gap-2">
                             <div class="w-8 h-8 bg-red-600 rounded-lg flex items-center justify-center">
                                 <i data-lucide="shield-check" class="w-5 h-5 text-white"></i>
                             </div>
-                            <span class="font-bold text-slate-800 text-sm">ID Emergencia</span>
-                            ${isAdmin ? `<span class="ml-1 bg-amber-100 text-amber-700 text-xs font-bold px-2 py-0.5 rounded-full admin-glow flex items-center gap-1"><i data-lucide="shield" class="w-3 h-3"></i> Admin</span>` : ''}
+                            <span class="font-bold text-slate-800 text-sm hidden sm:inline">ID Emergencia</span>
+                            ${isAdmin ? `<span class="ml-1 bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded-full admin-glow flex items-center gap-1"><i data-lucide="shield" class="w-3 h-3"></i> Admin</span>` : ''}
                         </div>
-                        <div class="flex items-center gap-2">
+                        <div class="flex items-center gap-1.5">
                             ${isAdmin ? `
-                            <button onclick="handleGenerateEmpty()" class="flex items-center gap-1.5 text-indigo-600 hover:text-indigo-800 font-semibold text-sm transition-colors bg-indigo-50 hover:bg-indigo-100 px-3 py-2 rounded-lg" title="Generar QR Vacío">
-                                <i data-lucide="qr-code" class="w-4 h-4"></i> Vacío
-                            </button>
-                            <button onclick="renderAdminPanel()" class="flex items-center gap-1.5 text-amber-600 hover:text-amber-700 font-semibold text-sm transition-colors bg-amber-50 hover:bg-amber-100 px-3 py-2 rounded-lg">
+                            <div class="flex bg-slate-100 rounded-lg p-1 border border-slate-200">
+                                <button onclick="handleGenerateEmpty('basic')" class="flex items-center justify-center text-indigo-600 hover:bg-white hover:shadow-sm font-semibold text-[11px] transition-all px-2.5 py-1.5 rounded-md" title="Generar QR Básico Vacío">
+                                    <i data-lucide="qr-code" class="w-3 h-3 mr-1"></i> Básico
+                                </button>
+                                <button onclick="handleGenerateEmpty('premium')" class="flex items-center justify-center text-amber-600 hover:bg-white hover:shadow-sm font-semibold text-[11px] transition-all px-2.5 py-1.5 rounded-md" title="Generar QR Premium Vacío">
+                                    <i data-lucide="qr-code" class="w-3 h-3 mr-1"></i> Premium
+                                </button>
+                            </div>
+                            <button onclick="renderAdminPanel()" class="flex items-center gap-1.5 text-slate-600 hover:text-slate-800 font-semibold text-sm transition-colors bg-slate-100 hover:bg-slate-200 px-3 py-2 rounded-lg ml-1">
                                 <i data-lucide="database" class="w-4 h-4"></i>
                             </button>` : `
                             <button onclick="requireAdmin(renderDashboard)" class="flex items-center gap-1 text-slate-500 hover:text-slate-700 font-medium text-sm transition-colors px-2 py-2 rounded-lg hover:bg-slate-100">
                                 <i data-lucide="lock" class="w-4 h-4"></i>
                             </button>`}
                             ${isAdmin ? `
-                            <button onclick="renderRegistration()" class="flex items-center gap-1.5 text-blue-600 hover:text-blue-800 font-semibold text-sm transition-colors bg-blue-50 hover:bg-blue-100 px-3 py-2 rounded-lg">
-                                <i data-lucide="plus" class="w-4 h-4"></i> Nuevo
+                            <button onclick="renderRegistration()" class="flex items-center justify-center text-blue-600 hover:text-blue-800 font-semibold text-sm transition-colors bg-blue-50 hover:bg-blue-100 w-9 h-9 rounded-lg shrink-0">
+                                <i data-lucide="plus" class="w-5 h-5"></i>
                             </button>` : ''}
                         </div>
                     </div>
@@ -1352,7 +1458,7 @@
                         </div>
                     </div>
 
-                    <div class="text-center pt-2 pb-4">
+                    <div class="text-center pt-2">
                         <p class="text-xs text-slate-400 flex justify-center items-center gap-1">
                             ${isFirebaseEnabled 
                                 ? '<i data-lucide="cloud" class="w-3.5 h-3.5 text-blue-500"></i> Base de datos en línea activa'
@@ -1366,14 +1472,14 @@
         lucide.createIcons();
     }
 
-    function handleGenerateEmpty() {
+    function handleGenerateEmpty(plan = 'premium') {
         if (AdminAuth.isLoggedIn()) {
-            State.generateEmptyProfile();
-            showToast('Código QR vacío generado', 'success');
+            State.generateEmptyProfile(plan);
+            showToast(`Código QR Vacío (${plan === 'premium' ? 'Premium' : 'Básico'}) generado`, 'success');
         } else {
             requireAdmin(() => {
-                State.generateEmptyProfile();
-                showToast('Código QR vacío generado', 'success');
+                State.generateEmptyProfile(plan);
+                showToast(`Código QR Vacío (${plan === 'premium' ? 'Premium' : 'Básico'}) generado`, 'success');
             });
         }
     }
@@ -1400,12 +1506,13 @@
             : profiles;
 
         const totalProfiles = profiles.length;
-        const personCount = profiles.filter(p => p.type === 'person' && p.status !== 'pending').length;
-        const petCount = profiles.filter(p => p.type === 'pet' && p.status !== 'pending').length;
+        const premiumCount = profiles.filter(p => p.plan !== 'basic' && p.status !== 'pending').length;
+        const basicCount = profiles.filter(p => p.plan === 'basic' && p.status !== 'pending').length;
 
         const tableRows = filteredProfiles.map((p, i) => {
             const realIndex = State.getProfileIndexById(p.id);
             const isPending = p.status === 'pending';
+            const isPremium = p.plan !== 'basic';
             const icon = isPending ? 'qr-code' : (p.type === 'pet' ? 'paw-print' : 'user');
             const typeLabel = isPending ? 'Vacío' : (p.type === 'pet' ? 'Mascota' : 'Persona');
             const createdDate = new Date(p.createdAt).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -1414,14 +1521,19 @@
                 <tr class="table-row border-b border-slate-100 transition-colors">
                     <td class="py-3 px-4">
                         <div class="flex items-center gap-3">
-                            ${p.photo && !isPending
+                            ${p.photo && !isPending && isPremium
                                 ? `<img src="${p.photo}" class="w-10 h-10 rounded-full object-cover shrink-0">`
                                 : `<div class="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
                                      <i data-lucide="${icon}" class="w-5 h-5 ${isPending ? 'text-indigo-400' : 'text-slate-400'}"></i>
                                    </div>`}
                             <div>
-                                <p class="font-semibold text-slate-800 text-sm">${isPending ? 'Código Vacío' : escapeHTML(p.name)}</p>
-                                ${p.type === 'pet' && p.ownerName && !isPending ? `<p class="text-xs text-slate-400">Dueño: ${escapeHTML(p.ownerName)}</p>` : ''}
+                                <p class="font-semibold text-slate-800 text-sm flex items-center gap-1.5">
+                                    ${isPending ? 'Código Vacío' : escapeHTML(p.name)}
+                                </p>
+                                <div class="flex items-center gap-2 mt-0.5">
+                                    <span class="text-[10px] font-bold px-1.5 py-0.5 rounded ${isPremium ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}">${isPremium ? 'Premium' : 'Básico'}</span>
+                                    ${p.type === 'pet' && p.ownerName && !isPending ? `<span class="text-xs text-slate-400">Dueño: ${escapeHTML(p.ownerName)}</span>` : ''}
+                                </div>
                             </div>
                         </div>
                     </td>
@@ -1434,7 +1546,6 @@
                     <td class="py-3 px-4">
                         ${isPending ? '<span class="text-sm text-slate-300">-</span>' : `<a href="tel:${escapeHTML(p.phone)}" class="text-sm text-blue-600 hover:underline font-medium">${escapeHTML(p.phone)}</a>`}
                     </td>
-                    <td class="py-3 px-4 text-xs text-slate-400">${createdDate}</td>
                     <td class="py-3 px-4">
                         <div class="flex items-center gap-1">
                             ${!isPending ? `
@@ -1457,7 +1568,7 @@
         }).join('');
 
         app.innerHTML = `
-            <div class="min-h-screen bg-slate-50">
+            <div class="min-h-screen bg-slate-50 pb-10">
                 <div class="bg-gradient-to-r from-amber-500 to-yellow-500 text-white px-5 py-4">
                     <div class="flex items-center gap-3">
                         <button onclick="renderDashboard()" class="p-2 -ml-2 rounded-lg hover:bg-white/20 transition-colors">
@@ -1482,12 +1593,12 @@
                             <div class="text-xs text-slate-400 font-medium">Total</div>
                         </div>
                         <div class="bg-white rounded-xl p-4 border border-slate-200 text-center">
-                            <div class="text-2xl font-black text-blue-600">${personCount}</div>
-                            <div class="text-xs text-slate-400 font-medium">Personas</div>
+                            <div class="text-2xl font-black text-amber-600">${premiumCount}</div>
+                            <div class="text-xs text-slate-400 font-medium">Premium</div>
                         </div>
                         <div class="bg-white rounded-xl p-4 border border-slate-200 text-center">
-                            <div class="text-2xl font-black text-amber-600">${petCount}</div>
-                            <div class="text-xs text-slate-400 font-medium">Mascotas</div>
+                            <div class="text-2xl font-black text-indigo-600">${basicCount}</div>
+                            <div class="text-xs text-slate-400 font-medium">Básicos</div>
                         </div>
                     </div>
 
@@ -1508,7 +1619,6 @@
                                         <th class="text-left text-xs font-bold text-slate-500 uppercase tracking-wider py-3 px-4">Usuario</th>
                                         <th class="text-left text-xs font-bold text-slate-500 uppercase tracking-wider py-3 px-4">Tipo</th>
                                         <th class="text-left text-xs font-bold text-slate-500 uppercase tracking-wider py-3 px-4">Teléfono</th>
-                                        <th class="text-left text-xs font-bold text-slate-500 uppercase tracking-wider py-3 px-4">Creado</th>
                                         <th class="text-left text-xs font-bold text-slate-500 uppercase tracking-wider py-3 px-4">Acciones</th>
                                     </tr>
                                 </thead>
@@ -1572,13 +1682,13 @@
         const profile = State.profiles[index];
         if (confirm(`¿Eliminar ${profile.status === 'pending' ? 'este código vacío' : `la ficha de "${profile.name}"`}?\n\nEsta acción no se puede deshacer.`)) {
             await State.deleteProfile(index);
-            if (!isFirebaseEnabled) renderAdminPanel(); // Si es online, se recargará por onSnapshot
+            if (!isFirebaseEnabled) renderAdminPanel();
             showToast('Elemento eliminado', 'info');
         }
     }
 
     // ====================================================
-    // ADMIN SETTINGS MODAL
+    // ADMIN SETTINGS MODAL & EXPORT/IMPORT
     // ====================================================
     function showAdminSettings() {
         const modalContainer = document.getElementById('modal-container');
@@ -1685,15 +1795,8 @@
         }
     }
 
-    // ====================================================
-    // EXPORT / IMPORT DATA
-    // ====================================================
     function exportData() {
-        const data = {
-            version: '2.0',
-            exportedAt: new Date().toISOString(),
-            profiles: State.profiles
-        };
+        const data = { version: '2.1', exportedAt: new Date().toISOString(), profiles: State.profiles };
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -1721,6 +1824,9 @@
                 if (confirm(`Se encontraron ${data.profiles.length} perfiles.\n\n¿Deseas importarlos a la base de datos?`)) {
                     showToast('Importando...', 'info');
                     for (const newProfile of data.profiles) {
+                        // Asegurar compatibilidad para datos viejos
+                        if (!newProfile.plan) newProfile.plan = 'premium';
+                        
                         if (isFirebaseEnabled) {
                             await setDoc(doc(profilesCollectionRef, newProfile.id), newProfile, {merge: true});
                         } else {
@@ -1742,9 +1848,6 @@
         input.click();
     }
 
-    // ====================================================
-    // PROTECTED EDIT/DELETE HANDLERS
-    // ====================================================
     function handleEditProfile(index) {
         if (AdminAuth.isLoggedIn()) renderRegistration(index);
         else requireAdmin(() => renderRegistration(index));
@@ -1762,7 +1865,7 @@
     }
 
     // ====================================================
-    // UTILITY FUNCTIONS
+    // UTILITY FUNCTIONS & EVENT BINDINGS
     // ====================================================
     function escapeHTML(str) {
         if (!str) return '';
@@ -1783,13 +1886,33 @@
 
     function buildEmergencyURLWithData(profile) {
         const base = window.location.origin + window.location.pathname;
+        // Solo codificar datos relevantes según el plan
         const payload = {
-            id: profile.id, type: profile.type, name: profile.name, ownerName: profile.ownerName || '',
-            phone: profile.phone, phoneAlt: profile.phoneAlt || '', bloodType: profile.bloodType || '',
-            allergies: profile.allergies || '', medicalNotes: profile.medicalNotes || '',
-            address: profile.address || '', breed: profile.breed || '', color: profile.color || '',
-            weight: profile.weight || '', photo: profile.photo || ''
+            id: profile.id, 
+            type: profile.type, 
+            plan: profile.plan || 'premium',
+            name: profile.name, 
+            phone: profile.phone, 
+            phoneAlt: profile.phoneAlt || ''
         };
+        
+        if (payload.plan === 'premium') {
+            if (profile.type === 'pet') {
+                payload.ownerName = profile.ownerName || '';
+                payload.breed = profile.breed || '';
+                payload.color = profile.color || '';
+                payload.weight = profile.weight || '';
+            } else {
+                payload.bloodType = profile.bloodType || '';
+            }
+            payload.allergies = profile.allergies || '';
+            payload.medicalNotes = profile.medicalNotes || '';
+            payload.address = profile.address || '';
+            payload.photo = profile.photo || '';
+        } else if (profile.type === 'pet') {
+             payload.ownerName = profile.ownerName || ''; // Mínimo para mascota básica
+        }
+
         const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
         return `${base}?view=emergency&data=${encoded}`;
     }
@@ -1865,7 +1988,7 @@
         const canvas = document.querySelector('#qr-display-pending canvas');
         if (canvas) {
             const link = document.createElement('a');
-            link.download = `QR-Vacio-${State.getActive().id}.png`;
+            link.download = `QR-Vacio-${State.getActive().plan === 'basic' ? 'Basico' : 'Premium'}-${State.getActive().id}.png`;
             link.href = canvas.toDataURL('image/png');
             link.click();
             showToast('QR descargado', 'success');
@@ -1879,8 +2002,8 @@
         const icons = { success: 'check-circle', error: 'alert-circle', info: 'info' };
 
         const toast = document.createElement('div');
-        toast.className = `fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] ${colors[type]} text-white px-5 py-3 rounded-xl shadow-2xl flex items-center gap-2 text-sm font-medium slide-up`;
-        toast.innerHTML = `<i data-lucide="${icons[type]}" class="w-5 h-5"></i> ${message}`;
+        toast.className = `fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] ${colors[type]} text-white px-5 py-3 rounded-full shadow-2xl flex items-center gap-2 text-sm font-medium slide-up`;
+        toast.innerHTML = `<i data-lucide="${icons[type]}" class="w-5 h-5"></i> <span class="whitespace-nowrap">${message}</span>`;
         document.body.appendChild(toast);
         lucide.createIcons();
 
@@ -1929,7 +2052,7 @@
                     </div>
                     <h1 class="text-3xl font-black text-slate-800 mb-2 tracking-tight">ID de Emergencia</h1>
                     <p class="text-slate-500 text-base mb-8 max-w-xs mx-auto leading-relaxed">
-                        Crea fichas de identificación con código QR que se sincronizan en <span class="font-semibold text-blue-600">tiempo real</span>.
+                        Crea fichas de identificación (Básicas o Premium) con código QR sincronizadas en <span class="font-semibold text-blue-600">tiempo real</span>.
                     </p>
                     <button onclick="renderRegistration()" class="w-full max-w-xs bg-blue-700 hover:bg-blue-800 active:bg-blue-900 text-white font-bold py-4 px-6 rounded-2xl transition-all shadow-lg shadow-blue-700/25 flex items-center justify-center gap-2 mx-auto">
                         <i data-lucide="plus-circle" class="w-5 h-5"></i> Crear Primera Ficha
@@ -1941,11 +2064,7 @@
         lucide.createIcons();
     }
 
-    // ====================================================
-    // INICIALIZACIÓN PRINCIPAL Y EVENTOS GLOBALES
-    // ====================================================
-    
-    // Adjuntar las funciones a Window para que los onClick sigan funcionando fuera del "module"
+    // Attach to Window
     window.togglePassVisibility = togglePassVisibility;
     window.closeLoginModal = closeLoginModal;
     window.requireAdmin = requireAdmin;
@@ -1963,6 +2082,7 @@
     window.deleteProfileFromAdmin = deleteProfileFromAdmin;
     window.confirmResetPassword = confirmResetPassword;
     window.confirmDeleteAllData = confirmDeleteAllData;
+    window.selectPlan = selectPlan;
     window.selectType = selectType;
     window.handlePhoto = handlePhoto;
     window.handleSubmit = handleSubmit;
@@ -1977,23 +2097,73 @@
     window.previewEmergency = previewEmergency;
     window.shareLocation = shareLocation;
 
-    function init() {
+    const GLOBAL_ACCESS_CODE = "1973";
+    const GLOBAL_ACCESS_KEY = "emergencyID_global_access";
+
+    function renderAppAccess() {
+        const app = document.getElementById('app');
+        app.innerHTML = `
+            <div class="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-6">
+                <div class="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm fade-in text-center border border-slate-100">
+                    <div class="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4 border border-blue-100">
+                        <i data-lucide="lock" class="w-8 h-8 text-blue-600"></i>
+                    </div>
+                    <h2 class="text-2xl font-bold text-slate-800 mb-2">Acceso a la App</h2>
+                    <p class="text-slate-500 text-sm mb-6">Ingresa el código de acceso general para continuar.</p>
+                    
+                    <form id="app-access-form" class="space-y-4">
+                        <input type="password" id="app-access-input" required autofocus
+                            class="w-full px-4 py-3 rounded-xl border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all text-center text-xl tracking-widest text-slate-800"
+                            placeholder="****">
+                        <div id="app-access-error" class="hidden text-red-500 text-sm font-medium bg-red-50 p-2 rounded-lg">Código incorrecto</div>
+                        <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold py-3 px-4 rounded-xl transition-all shadow shadow-blue-600/20">
+                            Ingresar
+                        </button>
+                        <p class="text-xs text-slate-400 mt-2">Administrador / Usuario</p>
+                    </form>
+                </div>
+            </div>
+        `;
+        lucide.createIcons();
+
+        document.getElementById('app-access-form').onsubmit = (e) => {
+            e.preventDefault();
+            const code = document.getElementById('app-access-input').value;
+            if (code === GLOBAL_ACCESS_CODE) {
+                safeStorage.setLocal(GLOBAL_ACCESS_KEY, 'true');
+                startApp();
+            } else {
+                const errorEl = document.getElementById('app-access-error');
+                errorEl.classList.remove('hidden');
+                const form = document.getElementById('app-access-form');
+                form.classList.add('shake');
+                setTimeout(() => form.classList.remove('shake'), 500);
+            }
+        };
+    }
+
+    function startApp() {
         State.loadLocalAuth();
         
-        // Render Loading Screen (Útil si la carga de firebase toma milisegundos)
         const app = document.getElementById('app');
         app.innerHTML = `
             <div class="min-h-screen flex flex-col items-center justify-center bg-slate-50">
-                <div class="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4"></div>
-                <p class="text-slate-500 font-medium fade-in">Conectando a la base de datos segura...</p>
+                <div class="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4 shadow"></div>
+                <p class="text-slate-500 font-medium fade-in">Conectando...</p>
             </div>
         `;
 
-        // Intentar inicializar Firebase primero
         initFirebase();
     }
 
-    // Wait for DOM to load
+    function init() {
+        if (safeStorage.getLocal(GLOBAL_ACCESS_KEY) === 'true') {
+            startApp();
+        } else {
+            renderAppAccess();
+        }
+    }
+
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);
     } else {
