@@ -217,28 +217,15 @@
 
                 if (isSupabaseEnabled) {
                     try {
-                        const updateData = {
-                            name: updatedProfile.name,
-                            status: updatedProfile.status,
-                            type: updatedProfile.type,
-                            plan: updatedProfile.plan,
-                            photo: updatedProfile.photo || null,
-                            phone: updatedProfile.phone || null,
-                            emergency_contact: updatedProfile.emergencyContact || null,
-                            emergency_phone: updatedProfile.emergencyPhone || null,
-                            medical_notes: updatedProfile.medicalNotes || null,
-                            allergies: updatedProfile.allergies || null,
-                            blood_type: updatedProfile.bloodType || null,
-                            address: updatedProfile.address || null,
-                            owner_name: updatedProfile.ownerName || null,
-                            breed: updatedProfile.breed || null,
-                            color: updatedProfile.color || null,
-                            weight: updatedProfile.weight || null,
-                            birth_date: updatedProfile.birthDate || null,
-                            updated_at: new Date().toISOString()
-                        };
-                        const { error } = await supabase.from('profiles').update(updateData).eq('id', updatedProfile.id);
-                        if (error) console.error("Error actualizando en Supabase:", error);
+                        const response = await fetch(`${SUPABASE_URL}/functions/v1/profiles/${updatedProfile.id}`, {
+                            method: 'PUT',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                            },
+                            body: JSON.stringify(updatedProfile)
+                        });
+                        if (!response.ok) console.error("Error actualizando en Supabase:", await response.text());
                     } catch(e) { console.error("Error actualizando en la nube:", e); }
                 } else {
                     this.saveLocalData();
@@ -257,8 +244,13 @@
 
             if (isSupabaseEnabled) {
                 try {
-                    const { error } = await supabase.from('profiles').delete().eq('id', profile.id);
-                    if (error) console.error("Error eliminando en Supabase:", error);
+                    const response = await fetch(`${SUPABASE_URL}/functions/v1/profiles/${profile.id}`, {
+                        method: 'DELETE',
+                        headers: {
+                            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                        }
+                    });
+                    if (!response.ok) console.error("Error eliminando en Supabase:", await response.text());
                 } catch(e) { console.error("Error eliminando en la nube:", e); }
             } else {
                 this.saveLocalData();
