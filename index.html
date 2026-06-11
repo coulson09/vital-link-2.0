@@ -2168,10 +2168,21 @@
         initFirebase();
     }
 
-    function init() {
-        if (safeStorage.getLocal(GLOBAL_ACCESS_KEY) === 'true') {
+function init() {
+        // 1. Obtenemos la ruta actual para saber qué está intentando ver el usuario
+        const route = getRoute();
+
+        // 2. Si viene de escanear un QR (para ver una emergencia o configurar un código vacío)
+        // le damos acceso directo a la aplicación sin pedir el PIN global.
+        if (route.view === 'emergency' || route.view === 'setup') {
             startApp();
-        } else {
+        } 
+        // 3. Si entra a la página principal, verificamos si ya había puesto el PIN antes
+        else if (safeStorage.getLocal(GLOBAL_ACCESS_KEY) === 'true') {
+            startApp();
+        } 
+        // 4. Si entra a la página principal y no tiene el PIN guardado, bloqueamos la pantalla
+        else {
             renderAppAccess();
         }
     }
