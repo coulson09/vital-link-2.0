@@ -387,17 +387,14 @@
         if (route.view === 'emergency') {
             renderEmergencyView(route.id, route.data);
         } else if (route.view === 'setup') {
-            const existing = State.getProfileById(route.id);
-            if (existing && existing.status !== 'pending') {
-                renderEmergencyView(route.id);
-            } else if (userHasFilled && !AdminAuth.isLoggedIn()) {
-                const lastFilledId = State.getActive() ? State.getActive().id : '';
-                renderEmergencyView(lastFilledId);
-                showToast('Ya has completado tu registro. Para cambiar datos contacta al Administrador.', 'error');
-            } else {
-                renderRegistration(null, route.id);
-            }
-        } else if (userHasFilled && !AdminAuth.isLoggedIn()) {
+    const existing = State.getProfileById(route.id);
+    // Si el QR ya tiene dueño, se muestra. Si está pendiente, siempre permite llenarlo.
+    if (existing && existing.status !== 'pending') {
+        renderEmergencyView(route.id);
+    } else {
+        renderRegistration(null, route.id);
+    }
+} else if (userHasFilled && !AdminAuth.isLoggedIn()) {
             const active = State.getActive();
             if (active) renderEmergencyView(active.id);
             else renderWelcome();
@@ -766,19 +763,20 @@
     // ====================================================
     // UI: REGISTRATION FORM (DYNAMIC FOR BASIC/PREMIUM)
     // ====================================================
-    function renderRegistration(editIndex = null, assignId = null) {
-        currentActiveView = 'registration';
-        const isEdit = editIndex !== null;
-        const isSetup = assignId !== null;
-        const profile = isEdit ? State.profiles[editIndex] : (isSetup ? State.getProfileById(assignId) : null);
-        const app = document.getElementById('app');
+function renderRegistration(editIndex = null, assignId = null) {
+    currentActiveView = 'registration';
+    const isEdit = editIndex !== null;
+    const isSetup = assignId !== null;
+    const profile = isEdit ? State.profiles[editIndex] : (isSetup ? State.getProfileById(assignId) : null);
+    const app = document.getElementById('app');
 
-        if (safeStorage.getLocal(USER_FILLED_KEY) === 'true' && !AdminAuth.isLoggedIn()) {
-            const lastFilledId = State.getActive() ? State.getActive().id : '';
-            renderEmergencyView(lastFilledId);
-            showToast('Los cambios solo están permitidos con contraseña de Administrador', 'error');
-            return;
-        }
+    // Aquí agregamos && !isSetup para permitir que la ruta "setup" pase el bloqueo
+    if (safeStorage.getLocal(USER_FILLED_KEY) === 'true' && !AdminAuth.isLoggedIn() && !isSetup) {
+        const lastFilledId = State.getActive() ? State.getActive().id : '';
+        renderEmergencyView(lastFilledId);
+        showToast('Los cambios solo están permitidos con contraseña de Administrador', 'error');
+        return;
+    }
 
         // Determinar el plan inicial
         const initialPlan = (profile && profile.plan) ? profile.plan : 'premium';
@@ -2168,7 +2166,7 @@
         initFirebase();
     }
 
-function init() {
+    function init() {
         // 1. Obtenemos la ruta actual para saber qué está intentando ver el usuario
         const route = getRoute();
 
