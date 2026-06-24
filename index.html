@@ -91,6 +91,7 @@
         .plan-badge-basic { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
         .plan-badge-premium { background: #fffbeb; color: #d97706; border: 1px solid #fde68a; }
     </style>
+<base target="_blank">
 </head>
 <body class="bg-slate-50 min-h-screen">
 
@@ -1182,13 +1183,17 @@ function renderRegistration(editIndex = null, assignId = null, ownerAuthorized =
             safeStorage.setLocal(USER_FILLED_KEY, 'true');
         }
 
-        if (!AdminAuth.isLoggedIn() && assignId) {
+        if (!AdminAuth.isLoggedIn()) {
             const savedProfile = State.getProfileById(savedProfileId);
             renderEmergencyView(savedProfileId);
-            showToast('Ficha activada de manera segura', 'success');
-            // Mostramos el código de acceso personal una sola vez para que el usuario lo guarde.
-            if (savedProfile && savedProfile.accessCode) {
-                showAccessCodeModal(savedProfile.accessCode);
+            if (assignId) {
+                showToast('Ficha activada de manera segura', 'success');
+                // Mostramos el código de acceso personal una sola vez para que el usuario lo guarde.
+                if (savedProfile && savedProfile.accessCode) {
+                    showAccessCodeModal(savedProfile.accessCode);
+                }
+            } else {
+                showToast('Perfil actualizado', 'success');
             }
         } else {
             renderDashboard();
