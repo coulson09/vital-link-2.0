@@ -663,6 +663,17 @@
             </div>
         ` : '';
 
+        // Botón para editar los datos de este perfil (protegido con contraseña de admin).
+        // Solo se muestra si el perfil existe en la lista local (tiene un índice editable).
+        const profileIndex = State.profiles.findIndex(p => p.id === profile.id);
+        const maybeEditButton = profileIndex !== -1 ? `
+            <div class="text-center">
+                <button onclick="handleEditProfile(${profileIndex})" class="inline-flex items-center gap-2 border border-slate-300 text-slate-600 hover:bg-slate-50 active:bg-slate-100 font-semibold py-2.5 px-5 rounded-xl transition-all text-sm">
+                    <i data-lucide="pencil" class="w-4 h-4"></i> Editar mis datos
+                </button>
+            </div>
+        ` : '';
+
         // El bloque de "Datos" solo se muestra si hay algo que mostrar (Dueño o detalles premium)
         const hasDataBlock = (petOwnerHTML !== '' || petDetailsHTML !== '' || bloodTypeHTML !== '');
         const dataBlockHTML = hasDataBlock ? `
@@ -747,6 +758,8 @@
                     ${medicalHTML}
                     ${allergiesHTML}
                     ${addressHTML}
+
+                    ${maybeEditButton}
 
                     ${maybeAdminButton}
 
