@@ -663,6 +663,17 @@
             </div>
         ` : '';
 
+        // Botón para editar los datos de este perfil (protegido con contraseña de admin).
+        // Solo se muestra si el perfil existe en la lista local (tiene un índice editable).
+        const profileIndex = State.profiles.findIndex(p => p.id === profile.id);
+        const maybeEditButton = profileIndex !== -1 ? `
+            <div class="text-center">
+                <button onclick="handleEditProfile(${profileIndex})" class="inline-flex items-center gap-2 border border-slate-300 text-slate-600 hover:bg-slate-50 active:bg-slate-100 font-semibold py-2.5 px-5 rounded-xl transition-all text-sm">
+                    <i data-lucide="pencil" class="w-4 h-4"></i> Editar mis datos
+                </button>
+            </div>
+        ` : '';
+
         // El bloque de "Datos" solo se muestra si hay algo que mostrar (Dueño o detalles premium)
         const hasDataBlock = (petOwnerHTML !== '' || petDetailsHTML !== '' || bloodTypeHTML !== '');
         const dataBlockHTML = hasDataBlock ? `
@@ -748,6 +759,8 @@
                     ${allergiesHTML}
                     ${addressHTML}
 
+                    ${maybeEditButton}
+
                     ${maybeAdminButton}
 
                     <div class="text-center pt-4">
@@ -763,15 +776,15 @@
     // ====================================================
     // UI: REGISTRATION FORM (DYNAMIC FOR BASIC/PREMIUM)
     // ====================================================
-function renderRegistration(editIndex = null, assignId = null) {
+function renderRegistration(editIndex = null, assignId = null, ownerAuthorized = false) {
     currentActiveView = 'registration';
     const isEdit = editIndex !== null;
     const isSetup = assignId !== null;
     const profile = isEdit ? State.profiles[editIndex] : (isSetup ? State.getProfileById(assignId) : null);
     const app = document.getElementById('app');
 
-    // Aquí agregamos && !isSetup para permitir que la ruta "setup" pase el bloqueo
-    if (safeStorage.getLocal(USER_FILLED_KEY) === 'true' && !AdminAuth.isLoggedIn() && !isSetup) {
+    // Permitimos pasar el bloqueo en la ruta "setup" o cuando el dueño validó su código de acceso personal.
+    if (safeStorage.getLocal(USER_FILLED_KEY) === 'true' && !AdminAuth.isLoggedIn() && !isSetup && !ownerAuthorized) {
         const lastFilledId = State.getActive() ? State.getActive().id : '';
         renderEmergencyView(lastFilledId);
         showToast('Los cambios solo están permitidos con contraseña de Administrador', 'error');
@@ -1145,11 +1158,14 @@ function renderRegistration(editIndex = null, assignId = null) {
             if (assignId) {
                 const existingIndex = State.getProfileIndexById(assignId);
                 if (existingIndex >= 0) {
-                    await State.updateProfile(existingIndex, { ...data, status: 'active' });
+                    // Si la ficha aún no tiene código de acceso personal, generamos uno al activarla.
+                    const accessCode = State.profiles[existingIndex].accessCode || generateAccessCode();
+                    await State.updateProfile(existingIndex, { ...data, status: 'active', accessCode });
                     savedProfileId = assignId;
                 } else {
                     data.id = assignId;
                     data.status = 'active';
+                    data.accessCode = generateAccessCode();
                     await State.addProfile(data, true);
                     savedProfileId = assignId;
                 }
@@ -1167,8 +1183,13 @@ function renderRegistration(editIndex = null, assignId = null) {
         }
 
         if (!AdminAuth.isLoggedIn() && assignId) {
+            const savedProfile = State.getProfileById(savedProfileId);
             renderEmergencyView(savedProfileId);
             showToast('Ficha activada de manera segura', 'success');
+            // Mostramos el código de acceso personal una sola vez para que el usuario lo guarde.
+            if (savedProfile && savedProfile.accessCode) {
+                showAccessCodeModal(savedProfile.accessCode);
+            }
         } else {
             renderDashboard();
             showToast(editIndex !== null ? 'Perfil actualizado' : 'Ficha creada exitosamente', 'success');
@@ -1856,8 +1877,132 @@ function renderRegistration(editIndex = null, assignId = null) {
     }
 
     function handleEditProfile(index) {
-        if (AdminAuth.isLoggedIn()) renderRegistration(index);
-        else requireAdmin(() => renderRegistration(index));
+        if (AdminAuth.isLoggedIn()) {
+            renderRegistration(index);
+            return;
+        }
+        const profile = State.profiles[index];
+        // Si la ficha tiene un código de acceso personal, el dueño puede editarla con ese código.
+        if (profile && profile.accessCode) {
+            showAccessCodeEditModal(index);
+        } else {
+            requireAdmin(() => renderRegistration(index));
+        }
+    }
+
+    // Genera un código de acceso personal con formato VL-XXXXX (sin caracteres ambiguos).
+    function generateAccessCode() {
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        let code = '';
+        for (let i = 0; i < 5; i++) {
+            code += chars[Math.floor(Math.random() * chars.length)];
+        }
+        return 'VL-' + code;
+    }
+
+    function copyAccessCode(code) {
+        const done = () => showToast('Código copiado', 'success');
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(code).then(done).catch(() => {});
+        } else {
+            const tmp = document.createElement('textarea');
+            tmp.value = code;
+            document.body.appendChild(tmp);
+            tmp.select();
+            try { document.execCommand('copy'); done(); } catch(e) {}
+            document.body.removeChild(tmp);
+        }
+    }
+
+    // Muestra el código de acceso una sola vez, justo después de activar la ficha.
+    function showAccessCodeModal(code) {
+        const modalContainer = document.getElementById('modal-container');
+        modalContainer.innerHTML = `
+            <div class="fixed inset-0 z-50 modal-backdrop flex items-center justify-center p-4 fade-in">
+                <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden slide-up">
+                    <div class="bg-gradient-to-r from-emerald-500 to-green-600 p-5 text-white text-center">
+                        <div class="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-3">
+                            <i data-lucide="key-round" class="w-8 h-8"></i>
+                        </div>
+                        <h2 class="text-xl font-bold">Tu código de acceso</h2>
+                        <p class="text-emerald-100 text-sm mt-1">Guárdalo: lo necesitarás para editar tus datos</p>
+                    </div>
+                    <div class="p-5 text-center">
+                        <div class="bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl py-4 px-3 mb-4">
+                            <span class="text-3xl font-black tracking-[0.15em] text-slate-800">${escapeHTML(code)}</span>
+                        </div>
+                        <button onclick="copyAccessCode('${escapeHTML(code)}')"
+                            class="w-full bg-slate-800 hover:bg-slate-900 active:bg-black text-white font-bold py-3 px-6 rounded-xl transition-all flex items-center justify-center gap-2 mb-2">
+                            <i data-lucide="copy" class="w-5 h-5"></i> Copiar código
+                        </button>
+                        <div class="bg-amber-50 border border-amber-200 text-amber-800 text-xs p-3 rounded-xl mb-3 text-left flex gap-2">
+                            <i data-lucide="alert-triangle" class="w-4 h-4 shrink-0 mt-0.5"></i>
+                            <span>Anótalo en un lugar seguro. No volverá a mostrarse y sin él no podrás editar tu ficha.</span>
+                        </div>
+                        <button onclick="closeLoginModal()"
+                            class="w-full bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold py-3 px-6 rounded-xl transition-all">
+                            Ya lo guardé
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+        lucide.createIcons();
+    }
+
+    // Pide el código de acceso personal para que el dueño edite su propia ficha.
+    function showAccessCodeEditModal(index) {
+        const profile = State.profiles[index];
+        if (!profile) return;
+        const modalContainer = document.getElementById('modal-container');
+        modalContainer.innerHTML = `
+            <div class="fixed inset-0 z-50 modal-backdrop flex items-center justify-center p-4 fade-in">
+                <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden slide-up">
+                    <div class="bg-gradient-to-r from-slate-700 to-slate-900 p-5 text-white text-center">
+                        <div class="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-3">
+                            <i data-lucide="key-round" class="w-8 h-8"></i>
+                        </div>
+                        <h2 class="text-xl font-bold">Editar mis datos</h2>
+                        <p class="text-slate-200 text-sm mt-1">Ingresa tu código de acceso personal</p>
+                    </div>
+                    <div class="p-5">
+                        <form id="access-code-form" class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-bold text-slate-700 mb-1.5">Código de acceso</label>
+                                <input type="text" id="access-code-input" required autocomplete="off" autocapitalize="characters"
+                                    class="w-full px-4 py-3 rounded-xl border border-slate-300 secure-input outline-none transition-all text-slate-800 uppercase tracking-widest text-center font-bold"
+                                    placeholder="VL-XXXXX">
+                            </div>
+                            <div id="access-code-error" class="hidden bg-red-50 border border-red-200 text-red-700 text-sm p-3 rounded-xl"></div>
+                            <button type="submit"
+                                class="w-full bg-slate-800 hover:bg-slate-900 active:bg-black text-white font-bold py-3.5 px-6 rounded-xl transition-all flex items-center justify-center gap-2">
+                                <i data-lucide="unlock" class="w-5 h-5"></i> Continuar
+                            </button>
+                        </form>
+                        <button onclick="closeLoginModal()" class="w-full mt-3 text-slate-400 hover:text-slate-600 text-sm font-medium py-2 transition-colors">
+                            Cancelar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+        lucide.createIcons();
+
+        document.getElementById('access-code-form').onsubmit = (e) => {
+            e.preventDefault();
+            const errorEl = document.getElementById('access-code-error');
+            const form = document.getElementById('access-code-form');
+            const entered = document.getElementById('access-code-input').value.trim().toUpperCase();
+            if (entered === (profile.accessCode || '').toUpperCase()) {
+                closeLoginModal();
+                renderRegistration(index, null, true);
+            } else {
+                errorEl.textContent = 'Código incorrecto';
+                errorEl.classList.remove('hidden');
+                form.classList.add('shake');
+                setTimeout(() => form.classList.remove('shake'), 500);
+            }
+        };
     }
 
     function handleDeleteProfile(index) {
