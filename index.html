@@ -1190,6 +1190,11 @@ function renderRegistration(editIndex = null, assignId = null, ownerAuthorized =
             if (savedProfile && savedProfile.accessCode) {
                 showAccessCodeModal(savedProfile.accessCode);
             }
+        } else if (!AdminAuth.isLoggedIn() && editIndex !== null) {
+            // El dueño editó su propia ficha con su código de acceso: lo devolvemos SOLO a su ficha,
+            // nunca al dashboard, para que no pueda ver los datos de otras personas.
+            renderEmergencyView(savedProfileId);
+            showToast('Datos actualizados', 'success');
         } else {
             renderDashboard();
             showToast(editIndex !== null ? 'Perfil actualizado' : 'Ficha creada exitosamente', 'success');
