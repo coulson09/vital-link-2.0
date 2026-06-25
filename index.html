@@ -2254,14 +2254,9 @@ function renderRegistration(editIndex = null, assignId = null, ownerAuthorized =
     window.previewEmergency = previewEmergency;
     window.shareLocation = shareLocation;
 
-const GLOBAL_ACCESS_HASH = "e3c486768212964d4226b0d686142937787464a8cb31c03ea63007a5b1a98aac";
-const GLOBAL_ACCESS_KEY = "emergencyID_global_access";
-
-async function verifyGlobalAccess(input) {
-    const hash = await AdminAuth.hashPassword(input);
-    return hash === GLOBAL_ACCESS_HASH;
-}
-
+    const GLOBAL_ACCESS_CODE = "1973";
+    const GLOBAL_ACCESS_KEY = "emergencyID_global_access";
+        
     function renderAppAccess() {
         const app = document.getElementById('app');
         app.innerHTML = `
